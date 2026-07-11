@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PROMPTAI">
-<!-- FedaPay Checkout.js — SDK officiel, chargé depuis le CDN FedaPay (nécessite une connexion internet au moment du paiement uniquement) -->
-<script src="https://cdn.fedapay.com/checkout.js?v=1.1.7"></script>
+<!-- KKiaPay SDK — chargé depuis le CDN officiel KKiaPay (nécessite une connexion internet au moment du paiement uniquement) -->
+<script src="https://cdn.kkiapay.me/k.js"></script>
 <style>
 /* ============================================================
    PROMPTAI — SYSTÈME DE DESIGN
@@ -382,14 +382,14 @@ footer.site-footer{
       <button class="icon-btn" data-close-modal aria-label="Fermer" type="button">✕</button>
     </div>
     <div class="modal-body">
-      <p style="margin-top:0">Paiement sécurisé par FedaPay (Mobile Money, carte bancaire). L'accès aux 30 expertises s'active automatiquement dès la confirmation du paiement.</p>
+      <p style="margin-top:0">Paiement sécurisé par KKiaPay (Mobile Money, carte bancaire, Wave). L'accès aux 30 expertises s'active automatiquement dès la confirmation du paiement.</p>
       <div class="plans-grid" id="plansGrid"><!-- injecté par JS --></div>
       <div id="checkoutStep" class="hidden">
         <h3 id="checkoutPlanLabel">Vos coordonnées</h3>
         <div class="checkout-form">
           <input type="text" id="custName" placeholder="Nom complet" autocomplete="name">
-          <input type="tel" id="custPhone" placeholder="Numéro de téléphone (Mobile Money)" autocomplete="tel">
-          <input type="email" id="custEmail" placeholder="Email (optionnel)" autocomplete="email">
+          <input type="tel" id="custPhone" placeholder="Téléphone (Mobile Money) — ou email ci-dessous" autocomplete="tel">
+          <input type="email" id="custEmail" placeholder="Email (carte bancaire) — ou téléphone ci-dessus" autocomplete="email">
           <button class="btn btn-primary btn-block" id="payBtn" type="button">Payer maintenant</button>
           <button class="btn btn-ghost btn-block btn-sm" id="backToPlansBtn" type="button">← Changer de forfait</button>
         </div>
@@ -427,16 +427,16 @@ footer.site-footer{
    risque qu'il visait à réduire. L'application doit s'exécuter
    partout, sans aucune configuration de domaine. La protection du
    modèle économique reste assurée par le chiffrement des 30 rôles
-   et par la vérification d'abonnement FedaPay (sections suivantes).
+   et par la vérification d'abonnement KKiaPay (sections suivantes).
    ============================================================ */
 
 /* ============================================================
    2) CONFIGURATION
    ============================================================ */
 var CONFIG = {
-  // Remplacez par votre VRAIE clé PUBLIQUE FedaPay (pk_live_... ou pk_sandbox_... pour les tests).
-  // Ne mettez JAMAIS votre clé secrète (sk_live_...) ici : elle ne doit jamais quitter votre backend/dashboard.
-  fedapayPublicKey: 'pk_live_OaeVWNpEO8YO6QzFaZkMT52x',
+  // Votre clé PUBLIQUE KKiaPay (visible sur app.kkiapay.me/dashboard, section Développeurs).
+  // Ne mettez JAMAIS votre clé secrète/privée KKiaPay ici : elle ne doit jamais quitter votre backend/dashboard.
+  kkiapayPublicKey: '5a2223a51cff4ee0029821e143a207f473f6f7f4',
   whatsapp: '2290196809106',
   email: 'empiredonko@gmail.com',
   currency: 'XOF',
@@ -444,7 +444,7 @@ var CONFIG = {
 };
 
 var PLANS = [
-  // amount = prix actif facturé via FedaPay. strikeAmount = ancien prix, affiché barré au-dessus.
+  // amount = prix actif facturé via KKiaPay. strikeAmount = ancien prix, affiché barré au-dessus.
   { id:'mensuel',     label:'Mensuel',     amount:500,   strikeAmount:2500,  months:1,  lifetime:false },
   { id:'trimestriel', label:'Trimestriel', amount:1200,  strikeAmount:6500,  months:3,  lifetime:false },
   { id:'semestriel',  label:'Semestriel',  amount:2000,  strikeAmount:12000, months:6,  lifetime:false },
@@ -469,7 +469,7 @@ var THEME_KEY   = 'promptai_theme_v1';
    quelque part dans le code pour permettre le déchiffrement dans le navigateur.
    Le verrou réel n'est donc pas ce secret (qu'un utilisateur déterminé pourrait
    retrouver dans le code source), mais la LOGIQUE APPLICATIVE : decryptRoles()
-   n'est appelée qu'après vérification d'un abonnement FedaPay valide (cf. plus
+   n'est appelée qu'après vérification d'un abonnement KKiaPay valide (cf. plus
    bas). Un frein sérieux contre la copie occasionnelle — pas un DRM absolu.
    ============================================================ */
 function getPassphrase(){
@@ -612,46 +612,52 @@ async function refreshAccessState(){
 }
 
 /* ============================================================
-   5) INTÉGRATION FEDAPAY (Checkout.js officiel)
+   5) INTÉGRATION KKIAPAY (SDK Javascript officiel — k.js)
+   ------------------------------------------------------------
+   Le widget KKiaPay s'ouvre via openKkiapayWidget() mais ne prend pas de
+   widget mais ne prend pas de callback par appel. Le résultat arrive
+   via deux écouteurs GLOBAUX (addSuccessListener / addFailedListener),
+   enregistrés une seule fois au démarrage (voir registerKkiapayListeners
+   plus bas). On retrouve le forfait concerné via state.pendingPlan,
+   déjà mémorisé au moment où l'utilisateur a choisi son forfait.
    ============================================================ */
-function openFedaPayCheckout(plan, customer){
-  if (typeof FedaPay === 'undefined'){
-    showToast("Le module de paiement FedaPay n'a pas pu se charger. Vérifiez votre connexion internet.", 'warn');
+function openKkiapayCheckout(plan, customer){
+  if (typeof openKkiapayWidget === 'undefined'){
+    showToast("Le module de paiement KKiaPay n'a pas pu se charger. Vérifiez votre connexion internet.", 'warn');
     return;
   }
   try{
-    var widget = FedaPay.init({
-      public_key: CONFIG.fedapayPublicKey,
-      transaction: {
-        amount: plan.amount,
-        description: 'Abonnement PROMPTAI \u2014 ' + plan.label,
-        custom_metadata: { plan_id: plan.id, app: 'PROMPTAI' }
-      },
-      customer: {
-        email: customer.email || undefined,
-        lastname: customer.name || 'Client',
-        firstname: 'PROMPTAI',
-        phone_number: customer.phone ? { number: customer.phone, country: CONFIG.country } : undefined
-      },
-      currency: { iso: CONFIG.currency },
-      onComplete: function(response){
-        var FP = window['FedaPay'];
-        if (FP && response && response.reason === FP.DIALOG_DISMISSED){
-          showToast('Fen\u00eatre de paiement ferm\u00e9e.', 'warn');
-          return;
-        }
-        if (response && response.transaction && response.transaction.status === 'approved'){
-          activateSubscription(plan, response.transaction.id);
-        } else {
-          showToast("Paiement non confirm\u00e9. R\u00e9essayez si le d\u00e9bit n'a pas abouti.", 'warn');
-        }
-      }
+    openKkiapayWidget({
+      amount: plan.amount,
+      key: CONFIG.kkiapayPublicKey,
+      name: customer.name || undefined,
+      email: customer.email || undefined,
+      phone: customer.phone || undefined,
+      data: JSON.stringify({ plan_id: plan.id, app: 'PROMPTAI', label: plan.label }),
+      paymentmethod: ['momo', 'card'],
+      countries: [CONFIG.country],
+      theme: '#C9932E'
     });
-    widget.open();
   }catch(e){
     console.error(e);
-    showToast("Impossible d'ouvrir le paiement FedaPay.", 'warn');
+    showToast("Impossible d'ouvrir le paiement KKiaPay.", 'warn');
   }
+}
+
+function registerKkiapayListeners(){
+  if (typeof addSuccessListener !== 'function' || typeof addFailedListener !== 'function') return;
+  addSuccessListener(function(response){
+    var plan = state.pendingPlan;
+    if (!plan){
+      showToast('Paiement confirmé, mais le forfait choisi a été perdu — contactez le support.', 'warn');
+      return;
+    }
+    activateSubscription(plan, (response && response.transactionId) || null);
+  });
+  addFailedListener(function(error){
+    console.warn('KKiaPay: paiement échoué/annulé', error);
+    showToast("Paiement non confirmé. Réessayez si le débit n'a pas abouti.", 'warn');
+  });
 }
 
 /* ============================================================
@@ -964,7 +970,7 @@ var LEGAL_CONTENT = {
     title: "Conditions Générales d'Utilisation",
     body: [
       "<strong>Objet.</strong> PROMPTAI est un outil local de génération de prompts structurés destiné aux entreprises, boutiques et commerçants de la zone UEMOA. L'application s'exécute intégralement dans votre navigateur, sans serveur ni base de données externe.",
-      "<strong>Abonnement.</strong> L'accès complet aux 30 expertises est proposé par abonnement payant (Mensuel, Trimestriel, Semestriel, Annuel, 2 Ans ou À Vie), réglé via FedaPay. Un métier (« Prompt Engineer Souverain ») reste utilisable gratuitement à titre de démonstration.",
+      "<strong>Abonnement.</strong> L'accès complet aux 30 expertises est proposé par abonnement payant (Mensuel, Trimestriel, Semestriel, Annuel, 2 Ans ou À Vie), réglé via KKiaPay (Mobile Money, carte bancaire, Wave). Un métier (« Prompt Engineer Souverain ») reste utilisable gratuitement à titre de démonstration.",
       "<strong>Nature du service.</strong> PROMPTAI génère des prompts, c'est-à-dire des instructions destinées à être utilisées avec un outil d'intelligence artificielle tiers. Empire Donko (TransTech Dynamic) ne fournit pas l'IA elle-même et ne garantit pas les réponses obtenues à partir des prompts générés.",
       "<strong>Remboursement et annulation.</strong> PROMPTAI étant un produit numérique, aucun remboursement n'est possible après validation du paiement.",
       "<strong>Modification.</strong> Ces conditions peuvent évoluer ; la version applicable est celle publiée dans l'application au moment de l'utilisation."
@@ -987,9 +993,9 @@ var LEGAL_CONTENT = {
     title: "Politique d'utilisation",
     body: [
       "<strong>Traitement local.</strong> Le contenu que vous saisissez (contexte, objectif, contraintes, format) est traité entièrement dans votre navigateur : il n'est envoyé à aucun serveur PROMPTAI.",
-      "<strong>Paiement.</strong> Au moment de l'abonnement, votre nom, téléphone et email sont transmis à FedaPay pour traiter la transaction, selon leur propre politique de confidentialité. PROMPTAI ne stocke pas ces informations sur un serveur.",
+      "<strong>Paiement.</strong> Au moment de l'abonnement, votre nom, téléphone et/ou email sont transmis à KKiaPay pour traiter la transaction (Mobile Money ou carte bancaire), selon leur propre politique de confidentialité. PROMPTAI ne stocke pas ces informations sur un serveur.",
       "<strong>Stockage local.</strong> Votre thème d'affichage et le statut de votre abonnement sont conservés uniquement dans le stockage local (localStorage) de ce navigateur, sur cet appareil.",
-      "<strong>Effacement.</strong> Vider le cache ou les données de site de votre navigateur effacera ce statut enregistré localement ; conservez votre reçu FedaPay comme preuve de paiement en cas de besoin.",
+      "<strong>Effacement.</strong> Vider le cache ou les données de site de votre navigateur effacera ce statut enregistré localement ; conservez votre reçu KKiaPay comme preuve de paiement en cas de besoin.",
       "<strong>Cookies.</strong> PROMPTAI n'utilise pas de cookies de suivi publicitaire."
     ]
   },
@@ -1197,8 +1203,8 @@ function wireEvents(){
     var name = document.getElementById('custName').value.trim();
     var phone = document.getElementById('custPhone').value.trim();
     var email = document.getElementById('custEmail').value.trim();
-    if (!phone){ showToast('Merci de renseigner votre numéro de téléphone (Mobile Money).', 'warn'); return; }
-    openFedaPayCheckout(state.pendingPlan, { name: name, phone: phone, email: email });
+    if (!phone && !email){ showToast('Merci de renseigner au moins un téléphone ou un email.', 'warn'); return; }
+    openKkiapayCheckout(state.pendingPlan, { name: name, phone: phone, email: email });
   });
 
   document.querySelectorAll('.modal-overlay').forEach(function(overlay){
@@ -1248,6 +1254,7 @@ async function init(){
   wireEvents();
   initInstallUI();
   registerServiceWorker();
+  registerKkiapayListeners();
 
   setInterval(function(){ refreshAccessState(); }, 60000);
   setInterval(checkDevTools, 1000);
